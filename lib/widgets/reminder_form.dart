@@ -18,11 +18,9 @@ class _ReminderFormState extends State<ReminderForm> {
   late final TextEditingController _titleController;
   late final TextEditingController _descriptionController;
   late DateTime _dateTime;
-  late Duration _interval;
-  bool _custom = false;
-  final _customController = TextEditingController(text: '3');
-
-  static const _presets = [2, 4, 6, 12, 24];
+  late final TextEditingController _daysController;
+  late final TextEditingController _hoursController;
+  late final TextEditingController _minutesController;
 
   @override
   void initState() {
@@ -30,18 +28,30 @@ class _ReminderFormState extends State<ReminderForm> {
     final initial = widget.initial;
     _titleController = TextEditingController(text: initial?.title);
     _descriptionController = TextEditingController(text: initial?.description);
-    _dateTime =
+    final date =
         initial?.dateTime ?? DateTime.now().add(const Duration(hours: 1));
-    _interval = initial?.reminderInterval ?? const Duration(hours: 4);
-    _custom = !_presets.contains(_interval.inHours);
-    if (_custom) _customController.text = '${_interval.inHours}';
+    _dateTime = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      date.hour,
+      date.minute,
+    );
+    final interval = initial?.reminderInterval ?? const Duration(hours: 4);
+    _daysController = TextEditingController(text: '${interval.inDays}');
+    _hoursController = TextEditingController(text: '${interval.inHours % 24}');
+    _minutesController = TextEditingController(
+      text: '${interval.inMinutes % 60}',
+    );
   }
 
   @override
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
-    _customController.dispose();
+    _daysController.dispose();
+    _hoursController.dispose();
+    _minutesController.dispose();
     super.dispose();
   }
 
@@ -49,10 +59,12 @@ class _ReminderFormState extends State<ReminderForm> {
     final picked = await showDatePicker(
       context: context,
       initialDate: _dateTime,
-      firstDate: DateTime.now(),
+      firstDate: _dateTime.isBefore(DateTime.now())
+          ? _dateTime
+          : DateTime.now(),
       lastDate: DateTime.now().add(const Duration(days: 3650)),
     );
-    if (picked != null)
+    if (picked != null && mounted) {
       setState(
         () => _dateTime = DateTime(
           picked.year,
@@ -62,6 +74,7 @@ class _ReminderFormState extends State<ReminderForm> {
           _dateTime.minute,
         ),
       );
+    }
   }
 
   Future<void> _pickTime() async {
@@ -69,7 +82,7 @@ class _ReminderFormState extends State<ReminderForm> {
       context: context,
       initialTime: TimeOfDay.fromDateTime(_dateTime),
     );
-    if (picked != null)
+    if (picked != null && mounted) {
       setState(
         () => _dateTime = DateTime(
           _dateTime.year,
@@ -79,25 +92,60 @@ class _ReminderFormState extends State<ReminderForm> {
           picked.minute,
         ),
       );
+    }
   }
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
-    final hours = _custom
-        ? int.tryParse(_customController.text) ?? 0
-        : _interval.inHours;
-    if (hours <= 0) return;
     widget.onSave(
       Reminder(
         id: widget.initial?.id,
         title: _titleController.text.trim(),
         description: _descriptionController.text.trim(),
         dateTime: _dateTime,
-        reminderInterval: Duration(hours: hours),
+        reminderInterval: Duration(
+          days: _number(_daysController.text),
+          hours: _number(_hoursController.text),
+          minutes: _number(_minutesController.text),
+        ),
         completed: widget.initial?.completed ?? false,
       ),
     );
   }
+
+  int _number(String value) => int.tryParse(value.trim()) ?? 0;
+
+  String? _validateInterval(String? value) {
+    final text = value?.trim() ?? '';
+    if (text.isNotEmpty &&
+        (!RegExp(r'^\d+$').hasMatch(text) || int.tryParse(text) == null)) {
+      return 'Usa un entero positivo o 0';
+    }
+    final values = [
+      _number(_daysController.text),
+      _number(_hoursController.text),
+      _number(_minutesController.text),
+    ];
+    if (values.every((value) => value == 0)) {
+      return 'Indica al menos 1 minuto';
+    }
+    // Keep all 60 scheduled occurrences within DateTime's supported range.
+    final maxMinutes =
+        (8640000000000000 - _dateTime.millisecondsSinceEpoch) ~/ 60000 ~/ 60;
+    if (values.any((value) => value > maxMinutes) ||
+        values[0] * 1440 + values[1] * 60 + values[2] > maxMinutes) {
+      return 'Frecuencia fuera del rango admitido';
+    }
+    return null;
+  }
+
+  Widget _intervalField(String label, TextEditingController controller) =>
+      TextFormField(
+        controller: controller,
+        keyboardType: TextInputType.number,
+        decoration: InputDecoration(labelText: label, errorMaxLines: 3),
+        validator: _validateInterval,
+      );
 
   @override
   Widget build(BuildContext context) => Form(
@@ -156,41 +204,17 @@ class _ReminderFormState extends State<ReminderForm> {
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
+        Row(
           children: [
-            ..._presets.map(
-              (hours) => ChoiceChip(
-                label: Text('$hours h'),
-                selected: !_custom && _interval.inHours == hours,
-                onSelected: (_) => setState(() {
-                  _custom = false;
-                  _interval = Duration(hours: hours);
-                }),
-              ),
-            ),
-            ChoiceChip(
-              label: const Text('Personalizado'),
-              selected: _custom,
-              onSelected: (_) => setState(() => _custom = true),
-            ),
+            Expanded(child: _intervalField('Días', _daysController)),
+            const SizedBox(width: 10),
+            Expanded(child: _intervalField('Horas', _hoursController)),
+            const SizedBox(width: 10),
+            Expanded(child: _intervalField('Minutos', _minutesController)),
           ],
         ),
-        if (_custom) ...[
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _customController,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              labelText: 'Horas',
-              suffixText: 'h',
-            ),
-            validator: (value) => int.tryParse(value ?? '') == null
-                ? 'Introduce un número'
-                : null,
-          ),
-        ],
+        const SizedBox(height: 8),
+        const Text('Combina días, horas y minutos. Mínimo: 1 minuto.'),
         const SizedBox(height: 30),
         FilledButton(
           onPressed: _submit,

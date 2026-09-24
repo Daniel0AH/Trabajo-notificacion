@@ -47,7 +47,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
       MaterialPageRoute(builder: (_) => AddReminderScreen(initial: reminder)),
     );
-    if (result == null) return;
+    if (result == null || !mounted) return;
     final saved = result.id == null
         ? result.copyWith(id: DateTime.now().millisecondsSinceEpoch)
         : result;
@@ -86,14 +86,15 @@ class _HomeScreenState extends State<HomeScreen> {
           reminder: reminder,
           onEdit: () {
             Navigator.pop(context);
-            _openEditor(reminder);
+            _openEditor(
+              _reminders.firstWhere((item) => item.id == reminder.id),
+            );
           },
           onDelete: () => _delete(reminder),
           onToggle: (value) => _toggle(reminder, value),
         ),
       ),
     );
-    _load();
   }
 
   @override
@@ -103,14 +104,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_tab == 0 ? 'Mis recordatorios' : 'Calendario'),
-        actions: [
-          if (_tab == 0)
-            IconButton(
-              onPressed: () => _openEditor(),
-              icon: const Icon(Icons.add),
-              tooltip: 'Nuevo recordatorio',
-            ),
-        ],
       ),
       body: _tab == 1
           ? CalendarScreen(reminders: _reminders, onReminderTap: _openDetail)
@@ -125,6 +118,14 @@ class _HomeScreenState extends State<HomeScreen> {
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
                     letterSpacing: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Center(
+                  child: FilledButton.icon(
+                    onPressed: () => _openEditor(),
+                    icon: const Icon(Icons.add),
+                    label: const Text('Crear recordatorio'),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -153,13 +154,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      floatingActionButton: _tab == 0
-          ? FloatingActionButton(
-              onPressed: () => _openEditor(),
-              tooltip: 'Nuevo recordatorio',
-              child: const Icon(Icons.add),
-            )
-          : null,
     );
   }
 }

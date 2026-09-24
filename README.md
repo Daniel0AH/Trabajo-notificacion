@@ -9,18 +9,44 @@ calendario y programar avisos sin depender de un servidor.
 La aplicacion ya permite:
 
 - Crear recordatorios con titulo, descripcion, fecha y hora.
-- Elegir una frecuencia de 2, 4, 6, 12 o 24 horas.
-- Introducir una frecuencia personalizada en horas.
+- Crear alarmas desde un unico boton central, incluso cuando ya existen tareas.
+- Personalizar la frecuencia combinando dias, horas y minutos, desde 1 minuto.
 - Ver las tareas activas ordenadas por fecha.
 - Marcar tareas como completadas.
 - Editar y eliminar tareas.
-- Consultar un calendario mensual con puntos en los dias que tienen tareas.
-- Ver las tareas de un dia ordenadas por hora.
+- Consultar un calendario mensual conectado al estado de las alarmas, con puntos
+  en todos los dias que tienen repeticiones activas.
+- Ver las ocurrencias de un dia ordenadas por su hora real.
+- Cambiar de mes y volver a hoy, manteniendo el dia seleccionado dentro del mes.
 - Programar notificaciones locales periodicas.
 - Mantener los datos al cerrar y volver a abrir la aplicacion.
 
 La interfaz usa crema como color base, terracota como color de accion y un
 tono oscuro para el contenido.
+
+## Cambios de esta revision
+
+- Inicio: se retiraron el boton superior y el flotante. Se conserva el boton
+  central `Crear recordatorio`, tambien disponible cuando hay tareas.
+- Calendario: se inicializan las fechas en español antes de abrir la app. La
+  agenda calcula las repeticiones, no solo la fecha inicial, y refleja la
+  creacion, edicion, completado y eliminacion desde el mismo estado de inicio.
+  Una alarma completada deja de generar ocurrencias en el calendario.
+- Frecuencia: se eliminaron las opciones fijas. Los campos `Dias`, `Horas` y
+  `Minutos` se suman; por ejemplo, `0 / 1 / 30` equivale a cada 90 minutos.
+  Se rechazan cero total, negativos, decimales y valores fuera del rango de
+  fechas admitido. La edicion y las etiquetas conservan los minutos.
+- Avisos: calendario y notificaciones comparten el calculo de recurrencia en
+  `lib/utils/reminder_schedule.dart`. Se corrige el salto a la siguiente
+  ocurrencia cuando la fecha inicial ya paso. Los identificadores de avisos
+  respetan el limite de Android y evitan sobrescribir otra alarma; su `payload`
+  los relaciona con el recordatorio para cancelarlos.
+- Persistencia: se conserva el guardado local que ya existia. No se agregan
+  bases de datos, sincronizacion, dependencias ni nuevos campos persistidos.
+
+El calendario es el calendario interno de la aplicacion, conectado con sus
+alarmas y la fecha/hora del dispositivo. No sincroniza con Google Calendar,
+Outlook ni con un calendario externo del dispositivo.
 
 ## Como ejecutar el proyecto
 
@@ -55,8 +81,9 @@ declaran `POST_NOTIFICATIONS` y `RECEIVE_BOOT_COMPLETED` en el manifest.
 La entrada es `lib/main.dart`:
 
 1. Inicializa Flutter.
-2. Inicializa `NotificationService`.
-3. Ejecuta `ReminderApp`.
+2. Inicializa los formatos de fecha en español.
+3. Espera la inicializacion de `NotificationService` en Android/iOS.
+4. Ejecuta `ReminderApp`.
 
 `ReminderApp` configura el tema y muestra `HomeScreen`. `HomeScreen` es el
 coordinador actual del estado:
@@ -75,8 +102,9 @@ Al abrir la pantalla principal:
 1. Se cargan los recordatorios desde el almacenamiento local.
 2. Los recordatorios no completados vuelven a programar sus notificaciones.
 3. La pestaña `Tareas` muestra los recordatorios pendientes.
-4. La pestaña `Calendario` muestra el mes, los dias con tareas y el detalle del
-   dia seleccionado.
+4. La pestaña `Calendario` muestra el mes, los dias con repeticiones activas y
+   las horas del dia seleccionado. Las filas se construyen conforme se ven
+   para admitir frecuencias de un minuto sin crear miles de widgets a la vez.
 
 ## Modelo y almacenamiento
 
@@ -95,6 +123,10 @@ completed: bool
 `Reminder.toJson()` y `Reminder.fromJson()` definen el contrato de persistencia.
 Los datos se guardan como una lista de cadenas JSON en `SharedPreferences`, bajo
 la clave `reminders`, desde [lib/services/storage_service.dart](lib/services/storage_service.dart).
+
+El formato existente `intervalMinutes` ya admite las frecuencias nuevas. No
+requiere migraciones. `StorageService` sigue siendo el punto para conectar
+otro almacenamiento en una etapa posterior; esta revision no lo modifica.
 
 Para cambiar el formato persistido:
 
@@ -115,10 +147,20 @@ El comportamiento actual es:
 - Al editar, completar o eliminar, cancela los avisos asociados.
 - Al abrir la app, vuelve a llenar la ventana de ocurrencias futuras.
 - Un recordatorio completado no vuelve a programarse.
+- Las duraciones se cuentan como tiempo transcurrido: un dia equivale a 24 horas.
+- La configuracion de avisos disponible sigue siendo Android/iOS. En web y
+  escritorio funcionan la interfaz y el calendario, sin avisos nativos.
 
 Esto permite recordatorios periodicos mientras la app se vuelve a abrir
 ocasionalmente para renovar la ventana. Todavia no existe un campo `deadline`,
 por lo que la repeticion no se detiene en una fecha limite especifica.
+
+Con una frecuencia de un minuto, 60 ocurrencias cubren aproximadamente una
+hora desde el primer aviso programado. El calendario representa toda la
+recurrencia, incluso fuera de esa ventana. No se añade un servicio de fondo
+para renovarla en esta revision. Android conserva el modo de programacion
+inexacta: el sistema puede retrasar la entrega por ahorro de bateria; configurar
+un minuto no garantiza entrega exacta cada minuto en segundo plano.
 
 ## Estructura relevante
 
@@ -144,6 +186,7 @@ lib/
     notification_service.dart
   utils/
     date_utils.dart
+    reminder_schedule.dart
 ```
 
 `calendar_view.dart` existe como espacio para extraer la parte visual del
@@ -221,7 +264,7 @@ El calendario actual es mensual y muestra un unico nivel de detalle diario.
 Las siguientes mejoras pueden conectarse desde `CalendarScreen` sin cambiar el
 modelo base:
 
-- Selector de mes y salto a hoy.
+- Selector directo de mes y año (las flechas y el salto a hoy ya funcionan).
 - Vista semanal o diaria.
 - Filtros por completado, categoria o prioridad.
 - Arrastrar para cambiar fecha y hora.
@@ -229,15 +272,19 @@ modelo base:
 
 ## Pruebas
 
-El test actual comprueba que la aplicacion arranca y muestra el estado vacio.
-Las siguientes pruebas son las mas importantes para crecer con seguridad:
+Las pruebas cubren:
 
-- Serializacion y deserializacion de `Reminder`.
-- Guardado y carga de `StorageService`.
-- Calculo de la siguiente ocurrencia de una notificacion.
-- Creacion y edicion desde el formulario.
-- Cambio de completado y eliminacion.
-- Seleccion de fechas y tareas en el calendario.
+- Un unico boton para crear, con y sin tareas.
+- Creacion y edicion con minutos y duraciones combinadas; validaciones.
+- Recurrencias entre dias, meses y años, año bisiesto y limites temporales.
+- Navegacion del calendario, retorno a hoy y apertura de la alarma original.
+- Actualizacion del calendario al crear, editar, completar y eliminar.
+- Construccion de filas visibles para alarmas de un minuto.
+- Programacion y cancelacion de avisos mediante un canal nativo simulado,
+  incluyendo identificadores validos y alarmas sin colisiones entre si.
+
+Estas pruebas no sustituyen una comprobacion de entrega real de avisos en un
+dispositivo Android/iOS, especialmente con la aplicacion en segundo plano.
 
 Ejecutar siempre antes de integrar cambios:
 

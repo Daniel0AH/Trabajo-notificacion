@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/reminder.dart';
 import '../utils/date_utils.dart';
 
-class ReminderDetailScreen extends StatelessWidget {
+class ReminderDetailScreen extends StatefulWidget {
   const ReminderDetailScreen({
     super.key,
     required this.reminder,
@@ -18,17 +18,32 @@ class ReminderDetailScreen extends StatelessWidget {
   final ValueChanged<bool> onToggle;
 
   @override
+  State<ReminderDetailScreen> createState() => _ReminderDetailScreenState();
+}
+
+class _ReminderDetailScreenState extends State<ReminderDetailScreen> {
+  late bool _completed;
+
+  @override
+  void initState() {
+    super.initState();
+    _completed = widget.reminder.completed;
+  }
+
+  Reminder get reminder => widget.reminder;
+
+  @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
       actions: [
         IconButton(
-          onPressed: onEdit,
+          onPressed: widget.onEdit,
           icon: const Icon(Icons.edit_outlined),
           tooltip: 'Editar',
         ),
         IconButton(
           onPressed: () {
-            onDelete();
+            widget.onDelete();
             Navigator.pop(context);
           },
           icon: const Icon(Icons.delete_outline),
@@ -66,8 +81,11 @@ class ReminderDetailScreen extends StatelessWidget {
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: const Text('Completado'),
-          value: reminder.completed,
-          onChanged: onToggle,
+          value: _completed,
+          onChanged: (value) {
+            setState(() => _completed = value);
+            widget.onToggle(value);
+          },
         ),
       ],
     ),
